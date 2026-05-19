@@ -127,7 +127,7 @@ async function run() {
         
         await tutorsCollection.updateOne(
           { _id: new ObjectId(booking.tutorId) },
-          { $inc: { totalSlot: -1 } }
+          { $inc: { totalSlots: -1 } }
         );
         const result = await bookingsCollection.insertOne(booking);
         res.status(201).json(result);
