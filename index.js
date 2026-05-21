@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 const app = express();
 const port = process.env.PORT || 4500;
@@ -21,6 +22,24 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+)
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return res.status(401).json({ error: "No token provided" });
+  const token = authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Invalid token format" });
+
+  const { payload } = await jwtVerify(token, JWKS)
+  console.log(payload)
+    .catch(err => {
+      console.error("Token verification failed:", err);
+      return res.status(401).json({ error: "Invalid token" });
+    });
+  next();
+};
+
 
 async function run() {
   try {
@@ -34,9 +53,10 @@ async function run() {
 
 
     app.get('/api/tutors/mine', async (req, res) => {
+      console.log("Route hit! Query params received:", req.query);
       try {
         const { userId } = req.query; 
-        const result = await tutorsCollection.find({ userId }).toArray();
+        const result = await tutorsCollection.find({ authorId: userId }).toArray();
         res.json(result);
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -75,7 +95,7 @@ async function run() {
       }
     });
 
-    app.get('/api/tutors/:id', async (req, res) => {
+    app.get('/api/tutors/:id',  async (req, res) => {
       try {
         const { id } = req.params;
         const result = await tutorsCollection.findOne({ _id: new ObjectId(id) });
@@ -96,24 +116,24 @@ async function run() {
       }
     });
 
-    app.put('/api/tutors/:id', async (req, res) => {
-      try {
-        const { id } = req.params;
-        const updatedData = req.body;
-        const result = await tutorsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updatedData }
-        );
-        res.json(result);
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
-    });
+    // app.put('/api/tutors/:id', async (req, res) => {
+    //   try {
+    //     const { id } = req.params;
+    //     const updatedData = req.body;
+    //     const result = await tutorsCollection.updateOne(
+    //       { _id: new ObjectId(id) },
+    //       { $set: updatedData }
+    //     );
+    //     res.json(result);
+    //   } catch (err) {
+    //     res.status(500).json({ error: err.message });
+    //   }
+    // });
 
     app.delete('/api/tutors/:id', async (req, res) => {
       try {
-        const { id } = req.params;
-        const result = await tutorsCollection.deleteOne({ _id: new ObjectId(id) });
+        const { tutorId } = req.query;
+        const result = await tutorsCollection.deleteOne({ _id: new ObjectId(tutorId) });
         res.json(result);
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -121,9 +141,15 @@ async function run() {
     });
 
     
-    app.post('/api/bookings', async (req, res) => {
+    app.post('/api/bookings',verifyToken, async (req, res) => {
       try {
+        const {tutorId, userId} = req.params;
         const booking = req.body;
+        const checker = await tutorsCollection.findOne({ tutorId: tutorId, authorId: userId });
+
+        if(checker) {
+          return res.status(400).json({ error: "You already have a booking for this tutor" });
+        }
         
         await tutorsCollection.updateOne(
           { _id: new ObjectId(booking.tutorId) },
@@ -158,6 +184,67 @@ async function run() {
         res.status(500).json({ error: err.message });
       }
     });
+
+     app.delete('/api/tutors/mine', async (req, res) => {
+      console.log("Route hit! Query params received from delete function:", req.query);
+      try {
+        const { tutorId } = req.query; 
+        const result = await tutorsCollection.deleteOne({ _id: new ObjectId(tutorId) });
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+
+    app.put('/api/bookings/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = req.body;
+        const result = await bookingsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+   app.put('/api/tutors/mine', async (req, res) => {
+    console.log("hit updated")
+  try {
+    const { tutorId } = req.query;
+    const updatedData = req.body;
+    delete updatedData._id;
+
+
+    if (!tutorId || tutorId === 'undefined' || tutorId.length !== 24) {
+      return res.status(400).json({ 
+        error: `Invalid or missing tutorId. Received: "${tutorId}". It must be a 24-character hex string.` 
+      });
+    }
+
+  
+    delete updatedData._id;
+   
+    const result = await tutorsCollection.findOneAndUpdate(
+      { _id: new ObjectId(tutorId) },
+      { $set: updatedData },
+      { returnDocument: 'after' } 
+    );
+
+    const freshTutor = result;
+
+    if (!freshTutor) {
+      return res.status(404).json({ error: "Tutor listing not found" });
+    }
+
+    res.json(freshTutor);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
   } catch (err) {
     console.error(err);
