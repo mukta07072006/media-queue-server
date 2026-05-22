@@ -58,7 +58,7 @@ const ensureDb = async (req, res, next) => {
 };
 
 const JWKS = createRemoteJWKSet(
-  new URL("http://localhost:3000/api/auth/jwks") // ⚠️ Note: This localhost URL will fail on Vercel! It should use a production domain environment variable.
+  new URL("https://media-queue-a9.vercel.app/api/auth/jwks") // ⚠️ Note: This localhost URL will fail on Vercel! It should use a production domain environment variable.
 );
 
 const verifyToken = async (req, res, next) => {
