@@ -8,11 +8,13 @@ const app = express();
 const port = process.env.PORT || 4500;
 const uri = process.env.MONGODB_URI || "";
 
-// Middleware
-// app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:3000",
-//      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-//         allowedHeaders: ['Content-Type', 'Authorization']
-//  }));
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    process.env.LIVE_SITE_URL
+  ].filter(Boolean),
+  credentials: true
+}));
 
 app.use(cors())
 app.use(express.json()); 
@@ -133,7 +135,7 @@ async function run() {
       }
     });
 
-    app.post('/api/tutors', async (req, res) => {
+    app.post('/api/tutors',verifyToken, async (req, res) => {
       try {
         const tutor = req.body;
         const result = await tutorsCollection.insertOne(tutor);
@@ -172,7 +174,7 @@ async function run() {
       try {
         const {tutorId, userId} = req.query;
         const booking = req.body;
-        const checker = await tutorsCollection.findOne({ tutorId: tutorId, authorId: userId });
+        const checker = await bookingsCollection.findOne({ tutorId: tutorId, studentId: userId });
 
         if(checker) {
           return res.status(400).json({ error: "You already have a booking for this tutor" });
@@ -238,7 +240,7 @@ async function run() {
       }
     });
 
-   app.put('/api/tutors/mine', async (req, res) => {
+   app.put('/api/tutors/mine',verifyToken, async (req, res) => {
     console.log("hit updated")
   try {
     const { tutorId } = req.query;
@@ -281,10 +283,14 @@ async function run() {
 
 run().catch(console.dir);
 
+
+ module.exports = app;
+
+
 app.get('/', (req, res) => {
   res.send("Server is running!");
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(4500, () => console.log('Running on 4500'));
+}
