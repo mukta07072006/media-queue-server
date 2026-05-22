@@ -1,13 +1,12 @@
-require('dotenv').config();
+// require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 const app = express();
-const uri = process.env.MONGODB_URI || "";
 
-// ✅ Single cors — no double app.use(cors())
+// ─── Middleware ───────────────────────────────────────
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -18,7 +17,8 @@ app.use(cors({
 app.options('*', cors());
 app.use(express.json());
 
-const client = new MongoClient(uri, {
+// ─── MongoDB ──────────────────────────────────────────
+const client = new MongoClient(process.env.MONGODB_URI || "", {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
@@ -26,25 +26,6 @@ const client = new MongoClient(uri, {
   }
 });
 
-// ✅ Fix: use env variable, not hardcoded localhost
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.JWKS_URL || "http://localhost:3000/api/auth/jwks")
-);
-
-const verifyToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader) return res.status(401).json({ error: "No token provided" });
-  const token = authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: "Invalid token format" });
-  try {
-    await jwtVerify(token, JWKS);
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token" });
-  }
-};
-
-// ✅ Fix: connect once, reuse client — don't wrap routes inside run()
 let isConnected = false;
 const connectDB = async () => {
   if (!isConnected) {
@@ -57,9 +38,35 @@ const connectDB = async () => {
 
 const db = () => client.db('mediqueue');
 
+// ─── JWKS (lazy — avoids crash on Vercel cold start) ──
+let JWKS;
+const getJWKS = () => {
+  if (!JWKS) {
+    const jwksUrl = process.env.JWKS_URL;
+    if (!jwksUrl) throw new Error("JWKS_URL env variable is not set");
+    JWKS = createRemoteJWKSet(new URL(jwksUrl));
+  }
+  return JWKS;
+};
 
+// ─── Auth Middleware ──────────────────────────────────
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) return res.status(401).json({ error: "No token provided" });
+    const token = authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: "Invalid token format" });
+    await jwtVerify(token, getJWKS());
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
+
+// ─── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => res.send("Server is running!"));
 
+// ─── Tutor Routes ─────────────────────────────────────
 app.get('/api/tutors/home', async (req, res) => {
   try {
     await connectDB();
@@ -159,6 +166,7 @@ app.delete('/api/tutors/:id', async (req, res) => {
   }
 });
 
+// ─── Auth / User Routes ───────────────────────────────
 app.post('/api/auth/user', async (req, res) => {
   try {
     await connectDB();
@@ -179,14 +187,18 @@ app.get('/api/auth/user/:email', async (req, res) => {
   }
 });
 
+// ─── Booking Routes ───────────────────────────────────
 app.post('/api/bookings', verifyToken, async (req, res) => {
   try {
     await connectDB();
     const { tutorId, userId } = req.query;
     const booking = req.body;
     const checker = await db().collection("bookings").findOne({ tutorId, studentId: userId });
-    if (checker) return res.status(400).json({ error: "Already booked this tutor" });
-    await db().collection("tutors").updateOne({ _id: new ObjectId(booking.tutorId) }, { $inc: { totalSlots: -1 } });
+    if (checker) return res.status(400).json({ error: "You already have a booking for this tutor" });
+    await db().collection("tutors").updateOne(
+      { _id: new ObjectId(booking.tutorId) },
+      { $inc: { totalSlots: -1 } }
+    );
     const result = await db().collection("bookings").insertOne(booking);
     res.status(201).json(result);
   } catch (err) {
@@ -230,9 +242,9 @@ app.put('/api/bookings/:id', async (req, res) => {
   }
 });
 
-// ✅ Required for Vercel
+// ─── Export for Vercel ────────────────────────────────
 module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(4500, () => console.log('Running on 4500'));
+  app.listen(4500, () => console.log('Running on http://localhost:4500'));
 }
