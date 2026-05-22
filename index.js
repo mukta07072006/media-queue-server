@@ -1,4 +1,4 @@
-// require('dotenv').config();
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
@@ -9,10 +9,12 @@ const port = process.env.PORT || 4500;
 const uri = process.env.MONGODB_URI || "";
 
 // Middleware
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:3000",
-     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization']
- }));
+// app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:3000",
+//      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+//         allowedHeaders: ['Content-Type', 'Authorization']
+//  }));
+
+app.use(cors())
 app.use(express.json()); 
 
 const client = new MongoClient(uri, {
@@ -29,14 +31,15 @@ const verifyToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ error: "No token provided" });
   const token = authHeader.split(' ')[1];
+  console.log("Token received for verification:", token);
   if (!token) return res.status(401).json({ error: "Invalid token format" });
 
   const { payload } = await jwtVerify(token, JWKS)
-  console.log(payload)
-    .catch(err => {
-      console.error("Token verification failed:", err);
-      return res.status(401).json({ error: "Invalid token" });
-    });
+    // console.log(payload)
+      // .catch(err => {
+      //   console.error("Token verification failed:", err);
+      //   return res.status(401).json({ error: "Invalid token" });
+      // });
   next();
 };
 
@@ -50,6 +53,7 @@ async function run() {
     const db = client.db('mediqueue');
     const tutorsCollection = db.collection("tutors");
     const bookingsCollection = db.collection("bookings");
+    const usersCollection = db.collection("Profile");
 
 
     app.get('/api/tutors/mine', async (req, res) => {
@@ -63,6 +67,29 @@ async function run() {
       }
     });
 
+
+    app.post('/api/auth/user', async (req, res)=>{
+      try{
+        const userData = req.body;
+        const result = await usersCollection.insertOne(userData);
+        res.status(201).json(result);
+      }
+      catch(err){
+        res.status(500).json({ error: err.message });
+      }
+    })
+
+    app.get('/api/auth/user/:email', async (req,res)=>{
+      try{
+        const {email} =req.params
+        const result = await usersCollection.find({ email: email }).toArray();
+        res.json(result);
+      }
+      catch(err){
+        res.status(500).json({ error: err.message });
+      }
+
+    })
 
     app.get('/api/tutors/home', async (req, res) => {
     try {
@@ -143,7 +170,7 @@ async function run() {
     
     app.post('/api/bookings',verifyToken, async (req, res) => {
       try {
-        const {tutorId, userId} = req.params;
+        const {tutorId, userId} = req.query;
         const booking = req.body;
         const checker = await tutorsCollection.findOne({ tutorId: tutorId, authorId: userId });
 
