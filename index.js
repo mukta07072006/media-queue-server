@@ -14,7 +14,7 @@ app.use(cors({
   ].filter(Boolean),
   credentials: true
 }));
-app.options('*', cors());
+app.options('(.*)', cors());
 app.use(express.json());
 
 // ─── MongoDB ──────────────────────────────────────────
